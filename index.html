@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASCII.FX</title>
+<style>
+:root {
+  --bg: #0d0d0d;
+  --panel: #111;
+  --border: #1f1f1f;
+  --text: #e0e0e0;
+  --muted: #555;
+  --accent: #c8ff00;
+  --track: #1f1f1f;
+  --font: 'Courier New', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: var(--font);
+  color: var(--text);
+}
+
+/* ── Full-bleed canvas ── */
+#c {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  background: transparent;
+}
+
+/* ── Floating toolbar ── */
+#toolbar {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.tb-btn {
+  height: 34px;
+  padding: 0 16px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.1s, background 0.1s;
+}
+.tb-btn:last-child { border-right: none; }
+.tb-btn:hover { color: var(--accent); background: rgba(200,255,0,0.04); }
+
+/* colour swatch dot */
+#color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8ff00;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* filename label */
+#filename-label {
+  height: 34px;
+  padding: 0 14px;
+  display: none;
+  align-items: center;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* colour input overlays button — invisible but clickable */
+#char-color {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+/* ── Empty state ── */
+#hint {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+#hint h1 {
+  font-size: clamp(28px, 4vw, 56px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-align: center;
+}
+#hint h1 span { color: var(--accent); }
+#hint p {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="hint">
+  <h1>drop a PNG.<br><span>watch it scatter.</span></h1>
+  <p>click upload or drag anywhere</p>
+</div>
+
+<div id="toolbar">
+  <div id="filename-label"></div>
+  <button class="tb-btn" id="upload-btn">↑ upload</button>
+  <button class="tb-btn" id="color-btn" style="position:relative;overflow:hidden;">
+    <span id="color-dot"></span>colour
+    <input type="color" id="char-color" value="#c8ff00" title="">
+  </button>
+</div>
+
+<script>
+const hint      = document.getElementById('hint');
+const canvas    = document.getElementById('c');
+const ctx       = canvas.getContext('2d');
+const uploadBtn = document.getElementById('upload-btn');
+const colorBtn  = document.getElementById('color-btn');
+const colorDot  = document.getElementById('color-dot');
+const colorInput= document.getElementById('char-color');
+const fileLbl   = document.getElementById('filename-label');
+
+// All settings — preserved from sidebar version
+const S = {
+  brightness:   0,
+  contrast:     0,
+  threshold:    0,
+  charColor:    '#c8ff00',
+  fontSize:     9,
+  charset:      'dense',
+  mouseRadius:  35,
+  mouseForce:   10,
+  scrollForce:  20,
+  scrollSpread: 8,
+  returnSpeed:  8,
+  damping:      0.80,
+};
+
+const CHARSETS = {
+  dense:  ' .:-=+*#%@',
+  block:  ' ░▒▓█',
+  alpha:  ' abcdefghijklmnopqrstuvwxyz',
+  binary: ' 01',
+  minimal:' .:·'
+};
+
+// ── Colour picker ──────────────────────────────────────────────────────────
+colorInput.addEventListener('input', e => {
+  S.charColor = e.target.value;
+  colorDot.style.background = S.charColor;
+});
+
+// ── File input ─────────────────────────────────────────────────────────────
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.accept = 'image/*';
+fileInput.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0;';
+document.body.appendChild(fileInput);
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) { loadFile(fileInput.files[0]); fileInput.value = ''; }
+});
+
+// Global drag-drop
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+let rawImg = null;
+
+function loadFile(file) {
+  fileLbl.textContent = file.name;
+  fileLbl.style.display = 'flex';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => { rawImg = img; buildParticles(img); };
+    img.onerror = () => alert('Could not load image.');
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Particle system ────────────────────────────────────────────────────────
+let particles = [];
+let animId    = null;
+let mouseX = -9999, mouseY = -9999;
+let canvasRect = null;
+let scrollVel  = 0, scrollDecayTimer = null;
+let mouseActive = false, mouseIdleTimer = null;
+
+function applyAdjustments(r, g, b) {
+  const br = S.brightness;
+  const factor = (259 * (S.contrast + 255)) / (255 * (259 - S.contrast));
+  r = Math.max(0, Math.min(255, factor * (r - 128) + 128 + br));
+  g = Math.max(0, Math.min(255, factor * (g - 128) + 128 + br));
+  b = Math.max(0, Math.min(255, factor * (b - 128) + 128 + br));
+  return [r, g, b];
+}
+
+function buildParticles(img) {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+  particles = [];
+
+  const areaW = window.innerWidth;
+  const areaH = window.innerHeight;
+
+  canvas.width  = areaW;
+  canvas.height = areaH;
+
+  // Letterbox image into full viewport
+  const imgAspect  = img.width / img.height;
+  const areaAspect = areaW / areaH;
+  let dw, dh, dx, dy;
+  if (imgAspect > areaAspect) {
+    dw = areaW; dh = areaW / imgAspect;
+    dx = 0;     dy = (areaH - dh) / 2;
+  } else {
+    dh = areaH; dw = areaH * imgAspect;
+    dy = 0;     dx = (areaW - dw) / 2;
+  }
+
+  const off = document.createElement('canvas');
+  off.width = areaW; off.height = areaH;
+  const oc = off.getContext('2d');
+  oc.drawImage(img, dx, dy, dw, dh);
+  const imgData = oc.getImageData(0, 0, areaW, areaH);
+  const data    = imgData.data;
+
+  const res   = S.fontSize;
+  const chars = CHARSETS[S.charset] || CHARSETS.dense;
+
+  for (let y = res; y < areaH; y += res) {
+    for (let x = 0; x < areaW; x += res) {
+      const i = (y * areaW + x) * 4;
+      const alpha = data[i + 3];
+      if (alpha < 30) continue;
+
+      let [r, g, b] = applyAdjustments(data[i], data[i+1], data[i+2]);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+      if (S.threshold > 0 && lum * 255 < S.threshold) continue;
+
+      const ci   = Math.min(Math.floor(lum * (chars.length - 1)), chars.length - 1);
+      const char = chars[ci] === ' ' ? (chars[ci + 1] || '.') : chars[ci];
+      if (!char || char === ' ') continue;
+
+      particles.push({
+        x: x, y: y,
+        homeX: x, homeY: y,
+        vx: 0, vy: 0,
+        char,
+        opacity: alpha / 255,
+      });
+    }
+  }
+
+  hint.style.display = 'none';
+
+  requestAnimationFrame(() => {
+    canvasRect = canvas.getBoundingClientRect();
+    animId = requestAnimationFrame(animate);
+  });
+}
+
+function animate() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const lx  = mouseX - canvasRect.left;
+  const ly  = mouseY - canvasRect.top;
+  const r   = S.mouseRadius;
+  const r2  = r * r;
+  const mf  = S.mouseForce;
+  const rs  = (S.returnSpeed / 1000) * 10;
+  const dm  = S.damping;
+  const sf  = S.scrollForce;
+  const ss  = S.scrollSpread;
+  const col = S.charColor;
+  const fsize = S.fontSize;
+
+  ctx.font = fsize + "px 'Courier New',monospace";
+  ctx.fillStyle = col;
+
+  for (const p of particles) {
+    if (mouseActive) {
+      const dx = lx - p.x, dy = ly - p.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < r2 && d2 > 0.01) {
+        const d = Math.sqrt(d2);
+        const force = ((r - d) / r) * mf;
+        p.vx -= (dx / d) * force;
+        p.vy -= (dy / d) * force;
+      }
+    }
+
+    if (scrollVel !== 0) {
+      p.vx += (Math.random() - 0.5) * Math.abs(scrollVel) * ss;
+      p.vy += scrollVel * sf * 0.25 + (Math.random() - 0.5) * Math.abs(scrollVel) * sf * 0.1;
+    }
+
+    p.vx += (p.homeX - p.x) * rs;
+    p.vy += (p.homeY - p.y) * rs;
+    p.vx *= dm;
+    p.vy *= dm;
+    p.x += p.vx;
+    p.y += p.vy;
+
+    ctx.globalAlpha = p.opacity;
+    ctx.fillText(p.char, p.x, p.y);
+  }
+
+  ctx.globalAlpha = 1;
+  animId = requestAnimationFrame(animate);
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  mouseActive = true;
+  clearTimeout(mouseIdleTimer);
+  mouseIdleTimer = setTimeout(() => { mouseActive = false; }, 800);
+});
+window.addEventListener('mouseleave', () => {
+  mouseX = -9999; mouseY = -9999; mouseActive = false;
+});
+window.addEventListener('wheel', e => {
+  scrollVel = e.deltaY * 0.12;
+  clearTimeout(scrollDecayTimer);
+  scrollDecayTimer = setTimeout(() => { scrollVel = 0; }, 150);
+}, { passive: true });
+window.addEventListener('resize', () => {
+  if (rawImg) buildParticles(rawImg);
+});
+</script>
+</body>
+</html>
