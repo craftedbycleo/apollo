@@ -94,6 +94,53 @@ html, body {
   padding: 0;
 }
 
+/* ── Speed slider ── */
+#speed-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 16px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#speed-wrap:last-child { border-right: none; }
+#intro-speed {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 2px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+#intro-speed::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+#intro-speed::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+#speed-val {
+  color: var(--accent);
+  min-width: 2ch;
+}
+
 /* ── Empty state ── */
 #hint {
   position: fixed;
@@ -131,6 +178,7 @@ html, body {
 </div>
 
 <div id="toolbar">
+  <button class="tb-btn" id="refresh-btn">↺ replay</button>
   <button class="tb-btn" id="save-btn">↓ save png</button>
   <button class="tb-btn" id="color-btn" style="position:relative;overflow:hidden;">
     <span id="color-dot"></span>colour
@@ -154,10 +202,10 @@ const S = {
   charColor:    '#17CFB9',
   fontSize:     9,
   charset:      'dense',
-  mouseRadius:  35,
+  mouseRadius:  85,
   mouseForce:   10,
-  scrollForce:  20,
-  scrollSpread: 8,
+  scrollForce:  16,
+  scrollSpread: 12,
   returnSpeed:  8,
   damping:      0.80,
   hoverAmp:     0.8,   // max pixel drift
@@ -176,6 +224,11 @@ const CHARSETS = {
 colorInput.addEventListener('input', e => {
   S.charColor = e.target.value;
   colorDot.style.background = S.charColor;
+});
+
+// ── Replay button ──────────────────────────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  if (rawImg) buildParticles(rawImg);
 });
 
 // ── Save PNG ───────────────────────────────────────────────────────────────
@@ -230,7 +283,7 @@ let scrollVel  = 0, scrollDecayTimer = null;
 let mouseActive = false, mouseIdleTimer = null;
 let t = 0;
 let introProgress = 0; // 0→1 over intro duration
-const INTRO_DURATION = 1.8; // seconds
+let INTRO_DURATION = 3.5; // seconds
 
 function applyAdjustments(r, g, b) {
   const br = S.brightness;
@@ -324,7 +377,8 @@ function animate() {
   const lx  = mouseX - canvasRect.left;
   const ly  = mouseY - canvasRect.top;
   const r   = S.mouseRadius;
-  const r2  = r * r;
+  const rx  = r * 0.7;  // narrower horizontally
+  const ry  = r * 0.96;  // taller vertically, 40% shorter than before
   const mf  = S.mouseForce;
   const rs  = (S.returnSpeed / 1000) * 10;
   const dm  = S.damping;
@@ -356,10 +410,10 @@ function animate() {
     }
     if (mouseActive) {
       const dx = lx - p.x, dy = ly - p.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < r2 && d2 > 0.01) {
-        const d = Math.sqrt(d2);
-        const force = ((r - d) / r) * mf;
+      const ellipse = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+      if (ellipse < 1 && ellipse > 0.0001) {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const force = (1 - ellipse) * mf;
         p.vx -= (dx / d) * force;
         p.vy -= (dy / d) * force;
       }
