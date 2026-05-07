@@ -189,13 +189,13 @@ html, body {
 <script>
 const hint      = document.getElementById('hint');
 const canvas    = document.getElementById('c');
-const ctx       = canvas.getContext('2d');
+const ctx       = canvas.getContext('2d');f
 const colorBtn  = document.getElementById('color-btn');
 const colorDot  = document.getElementById('color-dot');
 const colorInput= document.getElementById('char-color');
 
 // All settings — preserved from sidebar version
-const S = {
+const S = {f
   brightness:   0,
   contrast:     0,
   threshold:    0,
@@ -283,7 +283,7 @@ let scrollVel  = 0, scrollDecayTimer = null;
 let mouseActive = false, mouseIdleTimer = null;
 let t = 0;
 let introProgress = 0; // 0→1 over intro duration
-let INTRO_DURATION = 4.5; // seconds
+let INTRO_DURATION = 3.5; // seconds
 
 function applyAdjustments(r, g, b) {
   const br = S.brightness;
